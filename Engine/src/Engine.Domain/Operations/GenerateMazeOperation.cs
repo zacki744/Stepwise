@@ -15,6 +15,9 @@ public sealed class GenerateMazeOperation(int width, int height, int seed) : IOp
     public sealed record PassageCarvedPayload(int From, int To);
     public OperationExecutionResult Execute(Graph input, OperationContext context)
     {
+        if (width < 1 || height < 1)
+            throw new ArgumentException($"width and height must be positive (got {width}x{height})");
+
         DatasetLimits.EnsureWithinLimit((long)width * height, $"Maze {width}x{height}");
 
         int nodeCount = width * height;
