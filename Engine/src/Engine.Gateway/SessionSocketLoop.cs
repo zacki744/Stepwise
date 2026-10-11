@@ -17,7 +17,7 @@ public static class SessionSocketLoop
 
     public static async Task RunAsync(
         WebSocket socket, SessionManager sessions, OperationRegistry registry,
-        ExecutionPolicy execution, int maxMessageBytes, CancellationToken ct)
+        ExecutionPolicy execution, int maxMessageBytes, ILogger logger, CancellationToken ct)
     {
         // The session this connection currently owns, exactly one at a time:
         // adopting a new one evicts the previous, and ending the connection evicts the current.
@@ -57,11 +57,11 @@ public static class SessionSocketLoop
                     switch (message)
                     {
                         case CreateSessionMessage create:
-                            await HandleCreateSession(socket, sessions, create, sessionId, ct, AdoptSession);
+                            await HandleCreateSession(socket, sessions, create, sessionId, logger, ct, AdoptSession);
                             break;
 
                         case RehydrateSessionMessage rehydrate:
-                            await HandleRehydrate(socket, sessions, registry, execution, rehydrate, ct, AdoptSession);
+                            await HandleRehydrate(socket, sessions, registry, execution, rehydrate, logger, ct, AdoptSession);
                             break;
 
                         case ExecuteOperationMessage execute when sessionId is Guid id:
@@ -72,7 +72,7 @@ public static class SessionSocketLoop
                                 await SendAsync(socket, new OperationFailedMessage(execute.RequestId, SessionExpiredReason), ct);
                                 break;
                             }
-                            await HandleExecute(socket, sessions, registry, execution, id, execute, ct);
+                            await HandleExecute(socket, sessions, registry, execution, id, execute, logger, ct);
                             break;
 
                         case ExecuteOperationMessage:
@@ -82,12 +82,12 @@ public static class SessionSocketLoop
                 }
                 catch (Exception ex) when (ex is not (OperationCanceledException or WebSocketException or MessageTooLargeException))
                 {
-                    LogUnexpected("HandleMessage", ex);
+                    logger.LogError(ex, "Unexpected error in {Context}", "HandleMessage");
                     await SendAsync(socket, new ErrorMessage("internal-error", "The server could not process that message"), ct);
                 }
             }
         }
-        catch (WebSocketException)
+        catch (Exception ex) when (ex is WebSocketException or IOException)
         {
             // Client vanished without a close handshake (closed tab, dropped network). Routine, not a crash.
         }
@@ -115,7 +115,7 @@ public static class SessionSocketLoop
 
     private static async Task HandleCreateSession(
         WebSocket socket, SessionManager sessions, CreateSessionMessage create,
-        Guid? replacing, CancellationToken ct, Action<Guid> adoptSession)
+        Guid? replacing, ILogger logger, CancellationToken ct, Action<Guid> adoptSession)
     {
         try
         {
@@ -135,14 +135,14 @@ public static class SessionSocketLoop
         }
         catch (Exception ex)
         {
-            LogUnexpected("CreateSession", ex);
+            logger.LogError(ex, "Unexpected error in {Context}", "CreateSession");
             await SendAsync(socket, new ErrorMessage("internal-error", "Failed to create session"), ct);
         }
     }
 
     private static async Task HandleRehydrate(
         WebSocket socket, SessionManager sessions, OperationRegistry registry, ExecutionPolicy execution,
-        RehydrateSessionMessage rehydrate, CancellationToken ct, Action<Guid> adoptSession)
+        RehydrateSessionMessage rehydrate, ILogger logger, CancellationToken ct, Action<Guid> adoptSession)
     {
         Guid? createdSessionId = null;
 
@@ -208,14 +208,14 @@ public static class SessionSocketLoop
         catch (Exception ex)
         {
             DiscardPartialSession();
-            LogUnexpected("Rehydrate", ex);
+            logger.LogError(ex, "Unexpected error in {Context}", "Rehydrate");
             await SendAsync(socket, new ErrorMessage("internal-error", "Failed to rehydrate session"), ct);
         }
     }
 
     private static async Task HandleExecute(
         WebSocket socket, SessionManager sessions, OperationRegistry registry, ExecutionPolicy execution,
-        Guid sessionId, ExecuteOperationMessage execute, CancellationToken ct)
+        Guid sessionId, ExecuteOperationMessage execute, ILogger logger, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(execute.OperationId))
         {
@@ -271,7 +271,7 @@ public static class SessionSocketLoop
         }
         catch (Exception ex)
         {
-            LogUnexpected("ExecuteOperation", ex);
+            logger.LogError(ex, "Unexpected error in {Context}", "ExecuteOperation");
             await SendAsync(socket, new OperationFailedMessage(execute.RequestId, "Internal error executing operation"), ct);
             return;
         }
@@ -299,9 +299,6 @@ public static class SessionSocketLoop
 
     private static bool IsClientInputException(Exception ex) =>
         ex is FormatException or KeyNotFoundException or InvalidOperationException or ArgumentException;
-
-    private static void LogUnexpected(string context, Exception ex) =>
-        Console.Error.WriteLine($"[SessionSocketLoop] Unexpected error in {context}: {ex}");
 
     private static Task SendAsync(WebSocket socket, ServerMessage message, CancellationToken ct)
     {

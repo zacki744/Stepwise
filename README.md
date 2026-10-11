@@ -1,4 +1,8 @@
-# Dataset Operation Engine
+# Stepwise
+
+[![CI](https://github.com/zacki744/Stepwise/actions/workflows/ci.yml/badge.svg)](https://github.com/zacki744/Stepwise/actions/workflows/ci.yml)
+
+*A dataset operation engine.*
 
 A stateful, in-memory backend for building and transforming **matrices, graphs and trees** over a live WebSocket session. A client creates a dataset, applies operations one at a time, and receives a streamed step trace and the result for each. The client owns undo and local persistence; the server holds the working state only while the session is alive.
 
@@ -8,7 +12,7 @@ The project is a showcase of backend systems engineering in .NET: concurrency co
 
 ## What it does
 
-- **3 dataset types** with flat, array-backed storage (no per-element objects): `Matrix` (flat `int[]`), `Graph` (CSR with weights), `Tree` (binary search tree via parallel arrays).
+- **3 dataset types** with flat, array-backed storage (no per-element objects): `Matrix` (flat `int[]`), `Graph` (CSR with weights), `Tree` (binary search tree stored in parallel lists indexed by slot, `-1` meaning no child).
 - **60 operations** across generation, modification, query, conversion and destruction — for example flood fill, Game of Life, grid pathfinding, shortest path, MST, Tarjan bridges/articulation points, strongly connected components, Dinic max-flow, bipartite matching, betweenness centrality, Floyd–Warshall, graph colouring, BST insert/remove/LCA/k-th smallest, and maze generation.
 - **Streamed traces**: each operation emits step events as it works, so a client can animate and log them. Very long traces are coalesced into one message plus the final state.
 - **Transactional semantics**: operations work on a copy; the session commits only after a successful `Execute`. A failure or abort changes nothing.
@@ -64,7 +68,7 @@ npm run dev
 
 ## Testing
 
-xUnit throughout. Domain tests need no server; gateway tests use `WebApplicationFactory` and talk to the real WebSocket endpoint. Algorithms are cross-checked against simple reference implementations where practical.
+xUnit throughout. Domain tests need no server; gateway tests use `WebApplicationFactory` and talk to the real WebSocket endpoint. The catalog-wide contract suite runs every registered operation against valid and hostile inputs. Property-based tests and golden tests for seeded generators are on the roadmap.
 
 ## Repository layout
 

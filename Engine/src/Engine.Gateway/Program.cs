@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using Engine.Gateway;
 using Engine.Session;
 using Microsoft.Extensions.Options;
@@ -43,11 +44,11 @@ app.Map("/session", async (
     try
     {
         await SessionSocketLoop.RunAsync(
-            socket, sessions, registry, execution, limits.Value.MaxMessageBytes, context.RequestAborted);
+            socket, sessions, registry, execution, limits.Value.MaxMessageBytes, app.Logger, context.RequestAborted);
     }
-    catch (Exception ex)
+    catch (Exception ex) when (ex is not (OperationCanceledException or WebSocketException or IOException))
     {
-        Console.WriteLine($"[SessionSocketLoop crashed] {ex}");
+        app.Logger.LogError(ex, "Session loop terminated unexpectedly");
     }
 });
 

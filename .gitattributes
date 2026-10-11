@@ -1,0 +1,6 @@
+# Normalise line endings so Windows (CRLF) and CI (LF) don't produce noisy diffs.
+* text=auto
+*.sln text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary
