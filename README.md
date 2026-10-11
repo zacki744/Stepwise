@@ -44,10 +44,16 @@ Engine.Gateway    ASP.NET Core host, WebSocket loop, operation catalog
 
 ## Wire protocol (short version)
 
-Client → server: `createSession`, `rehydrateSession`, `executeOperation`
+Client → server: `createSession`, `rehydrateSession`, `executeOperation`, `uploadChunk`
 Server → client: `sessionReady`, `stepEvent`, `operationComplete`, `operationFailed`, `error`
 
 `GET /operations` lists every operation with an example options payload.
+
+Messages are limited to 1 MiB per frame. A `createSession` or `rehydrateSession` that is larger (a 500,000-cell
+matrix is several MB of JSON) is sent as a series of `uploadChunk` messages: the client serialises the message,
+cuts the text into pieces and sends them in order with the same `uploadId`; the server reassembles them (up to
+64 MiB, finished within two minutes, with a server-wide cap on buffered upload bytes) and replies once, as if the
+message had arrived whole. See `engine-frontend/src/lib/protocol/upload.ts`.
 
 ## Getting started
 

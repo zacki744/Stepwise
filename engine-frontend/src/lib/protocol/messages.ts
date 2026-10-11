@@ -6,7 +6,8 @@
 export type ClientMessage =
   | CreateSessionMessage
   | RehydrateSessionMessage
-  | ExecuteOperationMessage;
+  | ExecuteOperationMessage
+  | UploadChunkMessage;
 
 export interface CreateSessionMessage {
   type: 'createSession';
@@ -31,6 +32,18 @@ export interface ExecuteOperationMessage {
   requestId: string;
   operationId: string;
   options: Record<string, unknown>;
+}
+
+/**
+ * One piece of a createSession/rehydrateSession message that is too large for a single frame (the
+ * server accepts at most 1 MiB per frame). See chunkMessage() in ./upload.ts.
+ */
+export interface UploadChunkMessage {
+  type: 'uploadChunk';
+  uploadId: string;
+  index: number;
+  total: number;
+  data: string;
 }
 
 // ---------- Server → client ----------

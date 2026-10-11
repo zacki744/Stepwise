@@ -1,5 +1,6 @@
 import { writable, type Writable } from 'svelte/store';
 import type { ClientMessage, ServerMessage } from '../protocol/messages';
+import { chunkMessage, needsChunking } from '../protocol/upload';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -74,6 +75,15 @@ export function send(message: ClientMessage): void {
     throw new Error('Cannot send: socket is not connected');
   }
   socket.send(JSON.stringify(message));
+}
+
+/** Like send(), but splits createSession/rehydrateSession messages that are too big for one frame. */
+export function sendLarge(message: ClientMessage): void {
+  if (!needsChunking(message)) {
+    send(message);
+    return;
+  }
+  for (const chunk of chunkMessage(message)) send(chunk);
 }
 
 export function disconnect(): void {
