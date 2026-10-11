@@ -23,6 +23,7 @@ public sealed class IsolateNodeOperation(int nodeIndex) : IOperation<Graph>
         if (nodeIndex < 0 || nodeIndex >= input.NodeCount)
             throw new ArgumentOutOfRangeException(nameof(nodeIndex));
 
+        context.Checkpoint(input.NodeCount + (long)input.EdgeCount); // rebuilding the graph copies every edge
         var trace = new TraceRecorder(context);
         var remaining = new List<(int From, int To, double Weight)>();
         int removedCount = 0;

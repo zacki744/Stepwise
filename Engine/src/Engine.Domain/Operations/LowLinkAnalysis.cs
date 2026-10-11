@@ -14,9 +14,12 @@ internal sealed class LowLinkAnalysis
     public List<(int Node, int Time)> VisitOrder { get; } = [];
     public List<(int A, int B)> Bridges { get; } = [];
 
-    public LowLinkAnalysis(Graph graph)
+    public LowLinkAnalysis(Graph graph, OperationContext context)
     {
         int n = graph.NodeCount;
+        // One linear pass over the graph: charge it up front so the work budget and time limit apply
+        // even when nothing interesting is found (and so nothing is traced).
+        context.Checkpoint(n + (long)graph.EdgeCount);
         IsArticulation = new bool[n];
 
         var disc = new int[n];                // 0 = unvisited; discovery times start at 1

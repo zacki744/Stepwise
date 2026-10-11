@@ -16,7 +16,7 @@ public sealed class FindArticulationPointsOperation : IOperation<Graph>
 
     public OperationExecutionResult Execute(Graph input, OperationContext context)
     {
-        var analysis = new LowLinkAnalysis(input);
+        var analysis = new LowLinkAnalysis(input, context);
         var trace = new TraceRecorder(context);
 
         foreach (var (node, time) in analysis.VisitOrder)

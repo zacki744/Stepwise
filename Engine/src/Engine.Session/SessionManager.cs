@@ -48,6 +48,21 @@ public sealed class SessionManager
         return DateTime.UtcNow - session.LastActiveUtc > threshold;
     }
 
+    /// <summary>
+    /// The session's current dataset, or null if there is no such session. Datasets are never mutated in
+    /// place (operations commit a new one), so the caller can read it without holding the session lock.
+    /// </summary>
+    public IDataset? TryGetDataset(Guid sessionId)
+    {
+        var session = TryGet(sessionId);
+        if (session is null) return null;
+        lock (session.SyncRoot)
+        {
+            session.Touch();
+            return session.Dataset;
+        }
+    }
+
     public bool Evict(Guid sessionId) => _sessions.TryRemove(sessionId, out _);
 
     public int ActiveSessionCount => _sessions.Count;

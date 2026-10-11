@@ -68,4 +68,16 @@ public class SessionManagerTests
 
         Assert.False(manager.Evict(Guid.NewGuid()));
     }
+
+    [Fact]
+    public void TryGetDataset_ReturnsTheCurrentDataset_AndNullForUnknownIds()
+    {
+        var manager = new SessionManager();
+        var session = manager.Create(new Matrix(2, 3));
+
+        var dataset = Assert.IsType<Matrix>(manager.TryGetDataset(session.Id));
+
+        Assert.Equal(2, dataset.Rows);
+        Assert.Null(manager.TryGetDataset(Guid.NewGuid()));
+    }
 }

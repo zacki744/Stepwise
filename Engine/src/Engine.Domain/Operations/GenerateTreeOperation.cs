@@ -28,7 +28,7 @@ public sealed class GenerateTreeOperation : IOperation<Tree>
     public OperationExecutionResult Execute(Tree input, OperationContext context)
     {
         var trace = new TraceRecorder(context);
-        var random = new Random(_seed);
+        var random = new DeterministicRandom(_seed);
         var values = new List<int?>(_count);
         var left = new List<int>(_count);
         var right = new List<int>(_count);

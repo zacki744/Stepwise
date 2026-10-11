@@ -21,7 +21,7 @@ public sealed class GenerateMazeOperation(int width, int height, int seed) : IOp
         DatasetLimits.EnsureWithinLimit((long)width * height, $"Maze {width}x{height}");
 
         int nodeCount = width * height;
-        var random = new Random(seed);
+        var random = new DeterministicRandom(seed);
         var adjacency = new List<int>[nodeCount];
         for (int i = 0; i < nodeCount; i++) adjacency[i] = [];
 

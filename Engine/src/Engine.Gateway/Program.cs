@@ -13,6 +13,8 @@ builder.Services.AddSingleton(sp =>
     new SessionManager(sp.GetRequiredService<IOptions<SessionLifecycleOptions>>().Value.MaxSessions));
 builder.Services.AddSingleton(_ => OperationCatalog.BuildDefault());
 builder.Services.AddSingleton<ExecutionPolicy>();
+builder.Services.AddSingleton(sp =>
+    new UploadBudget(sp.GetRequiredService<IOptions<ConnectionLimitsOptions>>().Value.MaxInFlightUploadBytes));
 builder.Services.AddHostedService<SessionSweeperService>();
 
 var app = builder.Build();
@@ -33,6 +35,7 @@ app.Map("/session", async (
     SessionManager sessions,
     OperationRegistry registry,
     ExecutionPolicy execution,
+    UploadBudget uploadBudget,
     IOptions<ConnectionLimitsOptions> limits) =>
 {
     if (!context.WebSockets.IsWebSocketRequest)
@@ -44,7 +47,7 @@ app.Map("/session", async (
     try
     {
         await SessionSocketLoop.RunAsync(
-            socket, sessions, registry, execution, limits.Value.MaxMessageBytes, app.Logger, context.RequestAborted);
+            socket, sessions, registry, execution, limits.Value, uploadBudget, app.Logger, context.RequestAborted);
     }
     catch (Exception ex) when (ex is not (OperationCanceledException or WebSocketException or IOException))
     {

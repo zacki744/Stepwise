@@ -17,11 +17,13 @@ public static class SessionSocketLoop
 
     public static async Task RunAsync(
         WebSocket socket, SessionManager sessions, OperationRegistry registry,
-        ExecutionPolicy execution, int maxMessageBytes, ILogger logger, CancellationToken ct)
+        ExecutionPolicy execution, ConnectionLimitsOptions limits, UploadBudget uploadBudget,
+        ILogger logger, CancellationToken ct)
     {
         // The session this connection currently owns, exactly one at a time:
         // adopting a new one evicts the previous, and ending the connection evicts the current.
         Guid? sessionId = null;
+        using var uploads = new UploadAssembler(limits, uploadBudget);
 
         void AdoptSession(Guid newId)
         {
@@ -29,11 +31,103 @@ public static class SessionSocketLoop
             sessionId = newId;
         }
 
+        // One bad message must never end the connection. The handlers deal with the failures
+        // we expect; this is the net for the ones we didn't.
+        async Task DispatchAsync(ClientMessage message)
+        {
+            try
+            {
+                switch (message)
+                {
+                    case CreateSessionMessage create:
+                        await HandleCreateSession(socket, sessions, create, sessionId, logger, ct, AdoptSession);
+                        break;
+
+                    case RehydrateSessionMessage rehydrate:
+                        await HandleRehydrate(socket, sessions, registry, execution, rehydrate, logger, ct, AdoptSession);
+                        break;
+
+                    case UploadChunkMessage chunk:
+                        await HandleUploadChunk(chunk);
+                        break;
+
+                    case GetStateMessage getState when sessionId is Guid stateSessionId:
+                        await HandleGetState(socket, sessions, stateSessionId, getState, ct);
+                        break;
+
+                    case GetStateMessage:
+                        await SendAsync(socket, new ErrorMessage("no-session", "Create a session first"), ct);
+                        break;
+
+                    case ExecuteOperationMessage execute when sessionId is Guid id:
+                        if (sessions.TryGet(id) is null)
+                        {
+                            // Evicted underneath us (idle sweep). Every Execute still gets exactly one terminal message.
+                            sessionId = null;
+                            await SendAsync(socket, new OperationFailedMessage(execute.RequestId, SessionExpiredReason), ct);
+                            break;
+                        }
+                        await HandleExecute(socket, sessions, registry, execution, id, execute, logger, ct);
+                        break;
+
+                    case ExecuteOperationMessage:
+                        await SendAsync(socket, new ErrorMessage("no-session", "Create a session first"), ct);
+                        break;
+                }
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or WebSocketException or MessageTooLargeException))
+            {
+                logger.LogError(ex, "Unexpected error in {Context}", "HandleMessage");
+                await SendAsync(socket, new ErrorMessage("internal-error", "The server could not process that message"), ct);
+            }
+        }
+
+        async Task HandleUploadChunk(UploadChunkMessage chunk)
+        {
+            var result = uploads.Accept(chunk);
+            switch (result.Status)
+            {
+                case UploadStatus.InProgress:
+                    return;
+
+                case UploadStatus.Rejected:
+                    await SendAsync(socket, new ErrorMessage(result.Code!, result.Message!), ct);
+                    return;
+            }
+
+            try
+            {
+                ClientMessage? inner;
+                try { inner = JsonSerializer.Deserialize<ClientMessage>(result.Json!, ProtocolJson.Options); }
+                catch (JsonException ex)
+                {
+                    await SendAsync(socket, new ErrorMessage("bad-request", ex.Message), ct);
+                    return;
+                }
+
+                if (inner is CreateSessionMessage or RehydrateSessionMessage)
+                    await DispatchAsync(inner);
+                else
+                    await SendAsync(socket, new ErrorMessage("invalid-upload",
+                        "An upload can only carry a createSession or rehydrateSession message"), ct);
+            }
+            finally
+            {
+                uploads.Reset(); // the buffered text is no longer needed, whatever happened
+            }
+        }
+
         try
         {
             while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
             {
-                var json = await BoundedMessageReader.ReadAsync(socket, maxMessageBytes, ct);
+                // A client that starts an upload and goes quiet must not hold buffered memory forever:
+                // while one is in progress, give each read only the time the upload has left.
+                var timeLeft = uploads.TimeRemaining;
+                using var uploadClock = timeLeft is null ? null : CancellationTokenSource.CreateLinkedTokenSource(ct);
+                if (timeLeft is { } left) uploadClock!.CancelAfter(left);
+
+                var json = await BoundedMessageReader.ReadAsync(socket, limits.MaxMessageBytes, uploadClock?.Token ?? ct);
                 if (json is null) break; // client closed
 
                 ClientMessage? message;
@@ -50,41 +144,7 @@ public static class SessionSocketLoop
                     continue;
                 }
 
-                // One bad message must never end the connection. The handlers deal with the failures
-                // we expect; this is the net for the ones we didn't.
-                try
-                {
-                    switch (message)
-                    {
-                        case CreateSessionMessage create:
-                            await HandleCreateSession(socket, sessions, create, sessionId, logger, ct, AdoptSession);
-                            break;
-
-                        case RehydrateSessionMessage rehydrate:
-                            await HandleRehydrate(socket, sessions, registry, execution, rehydrate, logger, ct, AdoptSession);
-                            break;
-
-                        case ExecuteOperationMessage execute when sessionId is Guid id:
-                            if (sessions.TryGet(id) is null)
-                            {
-                                // Evicted underneath us (idle sweep). Every Execute still gets exactly one terminal message.
-                                sessionId = null;
-                                await SendAsync(socket, new OperationFailedMessage(execute.RequestId, SessionExpiredReason), ct);
-                                break;
-                            }
-                            await HandleExecute(socket, sessions, registry, execution, id, execute, logger, ct);
-                            break;
-
-                        case ExecuteOperationMessage:
-                            await SendAsync(socket, new ErrorMessage("no-session", "Create a session first"), ct);
-                            break;
-                    }
-                }
-                catch (Exception ex) when (ex is not (OperationCanceledException or WebSocketException or MessageTooLargeException))
-                {
-                    logger.LogError(ex, "Unexpected error in {Context}", "HandleMessage");
-                    await SendAsync(socket, new ErrorMessage("internal-error", "The server could not process that message"), ct);
-                }
+                await DispatchAsync(message);
             }
         }
         catch (Exception ex) when (ex is WebSocketException or IOException)
@@ -105,7 +165,9 @@ public static class SessionSocketLoop
         }
         catch (OperationCanceledException)
         {
-            // Request aborted or server shutting down.
+            if (!ct.IsCancellationRequested)
+                logger.LogWarning("Closing a connection whose upload did not finish within {Timeout}", limits.UploadTimeout);
+            // Otherwise: request aborted or server shutting down.
         }
         finally
         {
@@ -285,16 +347,33 @@ public static class SessionSocketLoop
             return;
         }
 
-        // A coalesced trace leaves the client nothing to animate, so hand it the resulting dataset.
-        DatasetSnapshotDto? finalState =
-            TraceStreamingPolicy.WasCoalesced(outcome.Trace) && outcome.CommittedState is not null
+        // The resulting dataset rides along when it is small, so the client rarely needs getState. A
+        // coalesced trace leaves nothing to animate, so then it is sent whenever it fits the larger cap.
+        DatasetSnapshotDto? finalState = outcome.CommittedState is null ? null
+            : TraceStreamingPolicy.WasCoalesced(outcome.Trace)
                 ? DatasetSnapshots.TryCreate(outcome.CommittedState)
-                : null;
+                : DatasetSnapshots.TryCreateInline(outcome.CommittedState);
 
         await SendAsync(socket, new OperationCompleteMessage(
             execute.RequestId,
             outcome.Value is not null ? JsonSerializer.SerializeToElement(outcome.Value, ProtocolJson.Options) : null,
             finalState), ct);
+    }
+
+    private static async Task HandleGetState(
+        WebSocket socket, SessionManager sessions, Guid sessionId, GetStateMessage request, CancellationToken ct)
+    {
+        var dataset = sessions.TryGetDataset(sessionId);
+        if (dataset is null)
+        {
+            await SendAsync(socket, new OperationFailedMessage(request.RequestId, SessionExpiredReason), ct);
+            return;
+        }
+
+        var snapshot = DatasetSnapshots.TryCreate(dataset);
+        await SendAsync(socket, snapshot is null
+            ? new OperationFailedMessage(request.RequestId, "state-too-large: this dataset is too big to send as a snapshot")
+            : new StateMessage(request.RequestId, snapshot), ct);
     }
 
     private static bool IsClientInputException(Exception ex) =>

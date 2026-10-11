@@ -19,6 +19,7 @@ public sealed class AddConnectionOperation(int from, int to, double weight = 1.0
     {
         input.EnsureNode(from, nameof(from));
         input.EnsureNode(to, nameof(to));
+        context.Checkpoint(input.NodeCount + (long)input.EdgeCount); // rebuilding the graph copies every edge
         var trace = new TraceRecorder(context);
 
         if (input.GetNeighbors(from).Contains(to))

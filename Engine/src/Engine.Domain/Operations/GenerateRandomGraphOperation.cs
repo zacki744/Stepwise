@@ -48,7 +48,7 @@ public sealed class GenerateRandomGraphOperation : IOperation<Graph>
 
     public OperationExecutionResult Execute(Graph input, OperationContext context)
     {
-        var random = new Random(_seed);
+        var random = new DeterministicRandom(_seed);
         long possible = _directed ? (long)_nodes * (_nodes - 1) : (long)_nodes * (_nodes - 1) / 2;
 
         // Floyd's algorithm: m distinct values from [0, possible) with no rejection loop.

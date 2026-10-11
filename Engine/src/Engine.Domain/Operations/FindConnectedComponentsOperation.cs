@@ -20,6 +20,7 @@ public sealed class FindConnectedComponentsOperation : IOperation<Graph>
     public OperationExecutionResult Execute(Graph input, OperationContext context)
     {
         int n = input.NodeCount;
+        context.Checkpoint(n + (long)input.EdgeCount); // one pass over everything; only one trace event per component
         var visited = new bool[n];
         var trace = new TraceRecorder(context);
         var components = new List<List<int>>();

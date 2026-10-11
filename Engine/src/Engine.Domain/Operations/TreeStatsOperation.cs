@@ -14,6 +14,7 @@ public sealed class TreeStatsOperation : IOperation<Tree>
 
     public OperationExecutionResult Execute(Tree input, OperationContext context)
     {
+        context.Checkpoint(input.SlotCount); // walks every node but records one event per level
         var trace = new TraceRecorder(context);
 
         if (input.RootIndex is not int root)

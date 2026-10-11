@@ -11,6 +11,7 @@ public sealed class RemoveConnectionOperation(int from, int to) : IOperation<Gra
 
     public OperationExecutionResult Execute(Graph input, OperationContext context)
     {
+        context.Checkpoint(input.NodeCount + (long)input.EdgeCount); // rebuilding the graph copies every edge
         var original = input.AllDirectedEdges().ToList();
         var remaining = original
             .Where(e => !((e.From == from && e.To == to) || (e.From == to && e.To == from)))

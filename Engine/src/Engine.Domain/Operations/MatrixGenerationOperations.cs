@@ -132,7 +132,7 @@ public sealed class GenerateMazeGridOperation(int width, int height, int seed) :
             trace.Add(new DomainStepEvent("CellOpened", $"Opened ({r},{c})", new CellOpenedPayload(r, c)));
         }
 
-        var random = new Random(seed);
+        var random = new DeterministicRandom(seed);
         var visited = new bool[width * height];
         var stack = new Stack<int>();
         var options = new List<int>(4);
@@ -185,7 +185,7 @@ public sealed class RandomFillOperation : IOperation<Matrix>
     public OperationExecutionResult Execute(Matrix input, OperationContext context)
     {
         var trace = new TraceRecorder(context);
-        var random = new Random(_seed);
+        var random = new DeterministicRandom(_seed);
         var result = new Matrix(input.Rows, input.Columns);
 
         for (int r = 0; r < result.Rows; r++)

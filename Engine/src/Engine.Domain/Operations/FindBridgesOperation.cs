@@ -15,7 +15,7 @@ public sealed class FindBridgesOperation : IOperation<Graph>
 
 	public OperationExecutionResult Execute(Graph input, OperationContext context)
 	{
-		var analysis = new LowLinkAnalysis(input);
+		var analysis = new LowLinkAnalysis(input, context);
 		var trace = new TraceRecorder(context);
 		var bridges = new List<BridgeEdge>();
 
