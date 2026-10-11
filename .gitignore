@@ -1,0 +1,71 @@
+# ---------- .NET / Visual Studio ----------
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+artifacts/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+launchSettings.json.bak
+
+# Test & coverage output
+TestResults/
+[Tt]est[Rr]esult*/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+BenchmarkDotNet.Artifacts/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+
+# Local config / secrets (keep appsettings.json, ignore local overrides)
+appsettings.*.local.json
+appsettings.Development.local.json
+secrets.json
+*.pfx
+.env
+.env.*
+!.env.example
+
+# ---------- Node / SvelteKit (engine-frontend) ----------
+node_modules/
+.svelte-kit/
+build/
+dist/
+.output/
+.vercel/
+.netlify/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+
+# ---------- Editors / OS ----------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Logs / scratch ----------
+*.log
+logs/
+tmp/
+*.tmp
