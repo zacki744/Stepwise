@@ -33,7 +33,7 @@ public class OperationContractTests
 
     // ---------- sample datasets ----------
 
-    private static IDataset NewDataset(string datasetType) => datasetType switch
+    internal static IDataset NewDataset(string datasetType) => datasetType switch
     {
         "matrix" => SampleMatrix(),
         "graph" => SampleGraph(),

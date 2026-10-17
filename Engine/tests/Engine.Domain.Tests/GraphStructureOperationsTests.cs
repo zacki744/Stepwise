@@ -211,4 +211,95 @@ public class GraphStructureOperationsTests
     {
         Assert.Throws<ArgumentException>(() => new SubgraphOperation([0, 9]).Execute(Graph.Empty(3)));
     }
+
+    // ---------- remove-graph-node ----------
+
+    [Fact]
+    public void RemoveGraphNode_ShiftsHigherIndicesDown_AndDropsItsEdges()
+    {
+        var graph = Undirected(4, (0, 1), (1, 2), (2, 3)); // a path 0-1-2-3
+
+        var result = new RemoveGraphNodeOperation(1).Execute(graph);
+
+        var updated = Assert.IsType<Graph>(result.NewState);
+        Assert.Equal(3, updated.NodeCount);
+        Assert.Equal([(1, 2, 1.0), (2, 1, 1.0)], Edges(updated)); // old 2-3 is now 1-2
+        var info = Assert.IsType<RemoveGraphNodeResult>(result.Value);
+        Assert.Equal(1, info.RemovedNode);
+        Assert.Equal(4, info.EdgesRemoved); // 0>1, 1>0, 1>2, 2>1
+        Assert.Equal(3, info.NewNodeCount);
+        Assert.Equal(new[] { 0, 2, 3 }, info.OldOfNew);
+        Assert.False(info.Truncated);
+    }
+
+    [Fact]
+    public void RemoveGraphNode_LastNode_NeedsNoRenumbering()
+    {
+        var graph = Undirected(3, (0, 1), (1, 2));
+
+        var result = new RemoveGraphNodeOperation(2).Execute(graph);
+
+        Assert.Equal([(0, 1, 1.0), (1, 0, 1.0)], Edges(Assert.IsType<Graph>(result.NewState)));
+        Assert.Equal(new[] { 0, 1 }, Assert.IsType<RemoveGraphNodeResult>(result.Value).OldOfNew);
+    }
+
+    [Fact]
+    public void RemoveGraphNode_KeepsWeightsAndDirection()
+    {
+        var graph = new Graph(3, [(0, 2, 7.5), (2, 1, 3.0), (1, 1, 9.0)]);
+
+        var result = new RemoveGraphNodeOperation(0).Execute(graph);
+
+        Assert.Equal([(0, 0, 9.0), (1, 0, 3.0)], Edges(Assert.IsType<Graph>(result.NewState)));
+        Assert.Equal(1, Assert.IsType<RemoveGraphNodeResult>(result.Value).EdgesRemoved);
+    }
+
+    [Fact]
+    public void RemoveGraphNode_SelfLoopOnTheNode_CountsOnce()
+    {
+        var graph = new Graph(2, [(0, 0, 1.0), (0, 1, 1.0)]);
+
+        var result = new RemoveGraphNodeOperation(0).Execute(graph);
+
+        Assert.Equal(2, Assert.IsType<RemoveGraphNodeResult>(result.Value).EdgesRemoved);
+        Assert.Equal(0, Assert.IsType<Graph>(result.NewState).EdgeCount);
+    }
+
+    [Fact]
+    public void RemoveGraphNode_OnlyNode_LeavesAnEmptyGraph()
+    {
+        var result = new RemoveGraphNodeOperation(0).Execute(Graph.Empty(1));
+
+        Assert.Equal(0, Assert.IsType<Graph>(result.NewState).NodeCount);
+        Assert.Empty(Assert.IsType<RemoveGraphNodeResult>(result.Value).OldOfNew);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public void RemoveGraphNode_OutOfRange_Throws(int node)
+    {
+        Assert.Throws<ArgumentException>(() => new RemoveGraphNodeOperation(node).Execute(Graph.Empty(3)));
+    }
+
+    [Fact]
+    public void RemoveGraphNode_DoesNotMutateInput()
+    {
+        var graph = Undirected(3, (0, 1), (1, 2));
+
+        new RemoveGraphNodeOperation(1).Execute(graph);
+
+        Assert.Equal(3, graph.NodeCount);
+        Assert.Equal(4, graph.EdgeCount);
+    }
+
+    [Fact]
+    public void RemoveGraphNode_TheMappingMatchesTheRule()
+    {
+        var graph = Graph.Empty(6);
+
+        var info = Assert.IsType<RemoveGraphNodeResult>(new RemoveGraphNodeOperation(3).Execute(graph).Value);
+
+        Assert.Equal(new[] { 0, 1, 2, 4, 5 }, info.OldOfNew);
+    }
 }

@@ -1,4 +1,4 @@
-using System.Net.WebSockets;
+﻿using System.Net.WebSockets;
 using Engine.Gateway;
 using Engine.Session;
 using Microsoft.Extensions.Options;
@@ -22,11 +22,19 @@ app.UseWebSockets();
 
 app.MapGet("/operations", (OperationRegistry registry) =>
     registry.All
-        .Select(h => new
+        .Select(h =>
         {
-            id = h.OperationId,
-            datasetType = h.DatasetType,
-            exampleOptions = OperationExamples.TryGetElement(h.OperationId)
+            var descriptor = OperationDescriptors.TryGet(h.OperationId);
+            return new
+            {
+                id = h.OperationId,
+                datasetType = h.DatasetType,
+                label = descriptor?.Label ?? h.OperationId,
+                category = descriptor?.Category ?? "Other",
+                description = descriptor?.Description ?? "",
+                options = descriptor?.Options ?? [],
+                exampleOptions = OperationExamples.TryGetElement(h.OperationId)
+            };
         })
         .OrderBy(o => o.datasetType).ThenBy(o => o.id));
 

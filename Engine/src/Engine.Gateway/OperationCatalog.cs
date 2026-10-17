@@ -185,13 +185,19 @@ public static class OperationCatalog
         registry.Register(new OperationHandler<Graph>("add-connection",
             options => new AddConnectionOperation(
                 options["from"].GetInt32(), options["to"].GetInt32(),
-                options.TryGetValue("weight", out var w) ? w.GetDouble() : 1.0)));
+                options.TryGetValue("weight", out var w) ? w.GetDouble() : 1.0,
+                options.TryGetValue("directed", out var directedAdd) && directedAdd.GetBoolean())));
 
         registry.Register(new OperationHandler<Graph>("remove-connection",
-            options => new RemoveConnectionOperation(options["from"].GetInt32(), options["to"].GetInt32())));
+            options => new RemoveConnectionOperation(
+                options["from"].GetInt32(), options["to"].GetInt32(),
+                options.TryGetValue("directed", out var directedRemove) && directedRemove.GetBoolean())));
 
         registry.Register(new OperationHandler<Graph>("isolate-node",
             options => new IsolateNodeOperation(options["nodeIndex"].GetInt32())));
+
+        registry.Register(new OperationHandler<Graph>("remove-graph-node",
+            options => new RemoveGraphNodeOperation(options["nodeIndex"].GetInt32())));
 
         registry.Register(new OperationHandler<Graph>("find-articulation-points",
             _ => new FindArticulationPointsOperation()));

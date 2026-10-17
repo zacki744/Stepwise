@@ -42,6 +42,7 @@ public class OperationCatalogTests
     [InlineData("add-connection", "graph")]
     [InlineData("remove-connection", "graph")]
     [InlineData("isolate-node", "graph")]
+    [InlineData("remove-graph-node", "graph")]
     [InlineData("find-articulation-points", "graph")]
     [InlineData("find-bridges", "graph")]
     [InlineData("find-connected-components", "graph")]
