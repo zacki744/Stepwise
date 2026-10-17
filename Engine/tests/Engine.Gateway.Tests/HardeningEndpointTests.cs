@@ -45,6 +45,19 @@ public class HardeningEndpointTests
         Assert.True(document.RootElement.GetProperty("maxSessions").GetInt32() > 0);
     }
 
+    [Theory]
+    [InlineData("/health")]
+    [InlineData("/operations")]
+    public async Task Responses_CarryNosniff(string path)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+
+        using var response = await factory.CreateClient().GetAsync(path);
+
+        Assert.True(response.Headers.TryGetValues("X-Content-Type-Options", out var values));
+        Assert.Contains("nosniff", values!);
+    }
+
     // ---------- server-wide dataset budget ----------
 
     [Fact]

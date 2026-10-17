@@ -43,6 +43,12 @@ app.UseWebSockets(new WebSocketOptions
     KeepAliveTimeout = wsLimits.KeepAliveTimeout
 });
 app.UseCors();
+app.Use(async (context, next) =>
+{
+    // Responses here are JSON; stop browsers from guessing another type and treating them as something else.
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    await next();
+});
 
 if (app.Services.GetRequiredService<IOptions<SecurityOptions>>().Value.AllowedOrigins.Length == 0)
     app.Logger.LogWarning(
