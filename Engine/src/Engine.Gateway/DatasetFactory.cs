@@ -73,7 +73,9 @@ public static class DatasetFactory
                 throw new ArgumentException($"cells must be an array of exactly {expected} integers (rows*columns, row-major)");
 
             int i = 0;
-            foreach (var cell in Metered(cells.EnumerateArray(), context))
+            // Not metered: the array length was checked against rows*columns above (at most MaxCells) and each
+            // step is a plain store, so there is nothing super-linear to guard.
+            foreach (var cell in cells.EnumerateArray())
             {
                 matrix[i / matrix.Columns, i % matrix.Columns] = cell.GetInt32();
                 i++;
