@@ -1,0 +1,17 @@
+# A production-like run on your own machine:  docker compose up --build
+# Then: http://localhost:8080/health  and  ws://localhost:8080/session
+services:
+  gateway:
+    build: ./Engine
+    ports:
+      - "8080:8080"
+    environment:
+      # Websites allowed to connect from a browser. Empty = any website (the server logs a warning).
+      Security__AllowedOrigins__0: "http://localhost:5173"
+      # Uncomment ONLY when a reverse proxy in front sets X-Forwarded-For and the container is not reachable
+      # any other way; otherwise clients could fake their address and dodge the per-address connection cap.
+      # ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      SessionLifecycle__MaxSessions: "100"
+      ConnectionLimits__MaxConnectionsPerIp: "10"
+    # Sessions live in this process's memory, so run exactly one instance.
+    restart: unless-stopped

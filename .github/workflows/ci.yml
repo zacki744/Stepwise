@@ -19,3 +19,18 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --no-restore -c Release
       - run: dotnet test --no-build -c Release --verbosity normal
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t stepwise-gateway Engine
+      - name: Start the container and check /health
+        run: |
+          docker run -d --name gateway -p 8080:8080 stepwise-gateway
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:8080/health; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs gateway
+          exit 1
