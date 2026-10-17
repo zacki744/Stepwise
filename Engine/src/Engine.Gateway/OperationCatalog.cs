@@ -15,7 +15,24 @@ namespace Engine.Gateway;
 /// </summary>
 public static class OperationCatalog
 {
+    /// <summary>
+    /// The registry the server runs: every handler checks its options against its descriptor first, so
+    /// unknown, missing or wrongly typed options are refused with a clear message.
+    /// </summary>
     public static OperationRegistry BuildDefault()
+    {
+        var validated = new OperationRegistry();
+        foreach (var handler in BuildUnvalidated().All)
+        {
+            var descriptor = OperationDescriptors.TryGet(handler.OperationId)
+                ?? throw new InvalidOperationException($"Operation '{handler.OperationId}' has no descriptor, so its options cannot be validated");
+            validated.Register(new ValidatingOperationHandler(handler, descriptor));
+        }
+        return validated;
+    }
+
+    /// <summary>The bare handlers, exactly as registered. For tests that check the descriptors against what the handlers themselves demand.</summary>
+    public static OperationRegistry BuildUnvalidated()
     {
         var registry = new OperationRegistry();
         RegisterMatrixOperations(registry);

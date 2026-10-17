@@ -12,6 +12,7 @@ namespace Engine.Gateway.Tests;
 public class OperationDescriptorTests
 {
     private static readonly OperationRegistry Registry = OperationCatalog.BuildDefault();
+    private static readonly OperationRegistry BareRegistry = OperationCatalog.BuildUnvalidated();
 
     public static IEnumerable<object[]> AllOperationIds() => OperationContractTests.AllOperationIds();
 
@@ -80,7 +81,7 @@ public class OperationDescriptorTests
     [MemberData(nameof(AllOperationIds))]
     public void RequiredFlags_MatchWhatTheHandlerReallyDemands(string id)
     {
-        var handler = Registry.TryGet(id)!;
+        var handler = BareRegistry.TryGet(id)!; // the validator would make every "required" claim true by itself
         var example = OperationExamples.Parse(id);
 
         foreach (var option in Descriptor(id).Options)
