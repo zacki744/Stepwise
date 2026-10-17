@@ -36,7 +36,12 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddHostedService<SessionSweeperService>();
 
 var app = builder.Build();
-app.UseWebSockets();
+var wsLimits = app.Services.GetRequiredService<IOptions<ConnectionLimitsOptions>>().Value;
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = wsLimits.KeepAliveInterval,
+    KeepAliveTimeout = wsLimits.KeepAliveTimeout
+});
 app.UseCors();
 
 if (app.Services.GetRequiredService<IOptions<SecurityOptions>>().Value.AllowedOrigins.Length == 0)
@@ -95,7 +100,8 @@ app.Map("/session", async (
         return;
     }
 
-    using var slot = connections.TryAcquire(context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    var clientKey = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    using var slot = connections.TryAcquire(clientKey);
     if (slot is null)
     {
         app.Logger.LogWarning("Refused WebSocket from {Address}: too many connections", context.Connection.RemoteIpAddress);
@@ -107,7 +113,7 @@ app.Map("/session", async (
     try
     {
         await SessionSocketLoop.RunAsync(
-            socket, sessions, registry, execution, limits.Value, uploadBudget, app.Logger, context.RequestAborted);
+            socket, sessions, registry, execution, limits.Value, uploadBudget, app.Logger, clientKey, context.RequestAborted);
     }
     catch (Exception ex) when (ex is not (OperationCanceledException or WebSocketException or IOException))
     {

@@ -24,7 +24,7 @@ public static class SessionSocketLoop
     public static async Task RunAsync(
         WebSocket socket, SessionManager sessions, OperationRegistry registry,
         ExecutionPolicy execution, ConnectionLimitsOptions limits, UploadBudget uploadBudget,
-        ILogger logger, CancellationToken ct)
+        ILogger logger, string clientKey, CancellationToken ct)
     {
         // The session this connection currently owns, exactly one at a time:
         // adopting a new one evicts the previous, and ending the connection evicts the current.
@@ -47,11 +47,11 @@ public static class SessionSocketLoop
                 switch (message)
                 {
                     case CreateSessionMessage create:
-                        await HandleCreateSession(socket, sessions, execution, create, sessionId, logger, ct, AdoptSession);
+                        await HandleCreateSession(socket, sessions, execution, clientKey, create, sessionId, logger, ct, AdoptSession);
                         break;
 
                     case RehydrateSessionMessage rehydrate:
-                        await HandleRehydrate(socket, sessions, registry, execution, rehydrate, logger, ct, AdoptSession);
+                        await HandleRehydrate(socket, sessions, registry, execution, clientKey, rehydrate, logger, ct, AdoptSession);
                         break;
 
                     case UploadChunkMessage chunk:
@@ -79,7 +79,7 @@ public static class SessionSocketLoop
                             await SendAsync(socket, new OperationFailedMessage(execute.RequestId, DuplicateRequestReason), ct);
                             break;
                         }
-                        await HandleExecute(socket, sessions, registry, execution, id, execute, logger, ct);
+                        await HandleExecute(socket, sessions, registry, execution, clientKey, id, execute, logger, ct);
                         break;
 
                     case ExecuteOperationMessage:
@@ -129,17 +129,22 @@ public static class SessionSocketLoop
             }
         }
 
+        bool waitingOnUpload = false;
         try
         {
             while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
             {
                 // A client that starts an upload and goes quiet must not hold buffered memory forever:
-                // while one is in progress, give each read only the time the upload has left.
+                // while one is in progress, give each read only the time the upload has left. Otherwise a
+                // silent connection is closed after the idle rule for its state (stricter until it has a session).
                 var timeLeft = uploads.TimeRemaining;
-                using var uploadClock = timeLeft is null ? null : CancellationTokenSource.CreateLinkedTokenSource(ct);
-                if (timeLeft is { } left) uploadClock!.CancelAfter(left);
+                waitingOnUpload = timeLeft is not null;
+                var idle = sessionId is null ? limits.PreSessionTimeout : limits.IdleTimeout;
+                TimeSpan? wait = timeLeft ?? (idle > TimeSpan.Zero ? idle : null);
+                using var readClock = wait is null ? null : CancellationTokenSource.CreateLinkedTokenSource(ct);
+                if (wait is { } limit) readClock!.CancelAfter(limit);
 
-                var json = await BoundedMessageReader.ReadAsync(socket, limits.MaxMessageBytes, uploadClock?.Token ?? ct);
+                var json = await BoundedMessageReader.ReadAsync(socket, limits.MaxMessageBytes, readClock?.Token ?? ct, limits.MessageTimeout, ct);
                 if (json is null) break; // client closed
 
                 ClientMessage? message;
@@ -175,10 +180,21 @@ public static class SessionSocketLoop
                 // Peer already gone: nothing more to tell it.
             }
         }
+        catch (MessageTimeoutException ex)
+        {
+            logger.LogWarning("Closing a connection that stalled in the middle of a message ({Timeout})", ex.Timeout);
+            await TryCloseAsync(socket, "message timeout");
+        }
         catch (OperationCanceledException)
         {
             if (!ct.IsCancellationRequested)
-                logger.LogWarning("Closing a connection whose upload did not finish within {Timeout}", limits.UploadTimeout);
+            {
+                if (waitingOnUpload)
+                    logger.LogWarning("Closing a connection whose upload did not finish within {Timeout}", limits.UploadTimeout);
+                else
+                    logger.LogInformation("Closing a silent connection (no message within its idle limit)");
+                await TryCloseAsync(socket, waitingOnUpload ? "upload timeout" : "idle timeout");
+            }
             // Otherwise: request aborted or server shutting down.
         }
         finally
@@ -187,8 +203,21 @@ public static class SessionSocketLoop
         }
     }
 
+    // Best effort: a read that was cancelled may already have torn the socket down, and the peer may be gone.
+    private static async Task TryCloseAsync(WebSocket socket, string reason)
+    {
+        try
+        {
+            using var shortLived = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, reason, shortLived.Token);
+        }
+        catch (Exception ex) when (ex is WebSocketException or InvalidOperationException or OperationCanceledException or IOException)
+        {
+        }
+    }
+
     private static async Task HandleCreateSession(
-        WebSocket socket, SessionManager sessions, ExecutionPolicy execution, CreateSessionMessage create,
+        WebSocket socket, SessionManager sessions, ExecutionPolicy execution, string clientKey, CreateSessionMessage create,
         Guid? replacing, ILogger logger, CancellationToken ct, Action<Guid> adoptSession)
     {
         try
@@ -196,7 +225,7 @@ public static class SessionSocketLoop
             // Dataset construction runs first, so an invalid payload fails before touching the old session.
             // It is real work on caller-supplied data, so it takes an execution slot and a metered context.
             IDataset dataset;
-            using (var lease = await execution.TryEnterAsync(ct))
+            using (var lease = await execution.TryEnterAsync(clientKey, ct))
             {
                 if (lease is null)
                 {
@@ -236,7 +265,7 @@ public static class SessionSocketLoop
     }
 
     private static async Task HandleRehydrate(
-        WebSocket socket, SessionManager sessions, OperationRegistry registry, ExecutionPolicy execution,
+        WebSocket socket, SessionManager sessions, OperationRegistry registry, ExecutionPolicy execution, string clientKey,
         RehydrateSessionMessage rehydrate, ILogger logger, CancellationToken ct, Action<Guid> adoptSession)
     {
         Guid? createdSessionId = null;
@@ -250,7 +279,7 @@ public static class SessionSocketLoop
         {
             // The whole replay shares ONE context, so a long history can't buy unlimited work
             // by being split into many operations. The slot is released before any socket write.
-            using (var lease = await execution.TryEnterAsync(ct))
+            using (var lease = await execution.TryEnterAsync(clientKey, ct))
             {
                 if (lease is null)
                 {
@@ -308,7 +337,7 @@ public static class SessionSocketLoop
     }
 
     private static async Task HandleExecute(
-        WebSocket socket, SessionManager sessions, OperationRegistry registry, ExecutionPolicy execution,
+        WebSocket socket, SessionManager sessions, OperationRegistry registry, ExecutionPolicy execution, string clientKey,
         Guid sessionId, ExecuteOperationMessage execute, ILogger logger, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(execute.OperationId))
@@ -333,7 +362,7 @@ public static class SessionSocketLoop
         {
             // Held only while the operation computes, never while results are written to the
             // socket: a slow reader must not be able to hold execution capacity hostage.
-            using var lease = await execution.TryEnterAsync(ct);
+            using var lease = await execution.TryEnterAsync(clientKey, ct);
             if (lease is null)
             {
                 await SendAsync(socket, new OperationFailedMessage(execute.RequestId, ServerBusyReason), ct);
