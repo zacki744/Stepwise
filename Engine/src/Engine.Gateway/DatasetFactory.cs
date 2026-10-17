@@ -14,8 +14,31 @@ public static class DatasetFactory
         _ => throw new ArgumentException($"Unknown datasetType '{datasetType}'")
     };
 
+    // Besides the JSON shapes below, each dataset type accepts {"text": "..."}; see TextImport for the formats.
+    private static bool TryGetText(JsonElement payload, out string text)
+    {
+        text = "";
+        if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty("text", out var element)) return false;
+        if (element.ValueKind != JsonValueKind.String) throw new ArgumentException("text must be a string");
+        text = element.GetString()!;
+        return true;
+    }
+
+    private static void RejectAlongsideText(JsonElement payload, params string[] others)
+    {
+        foreach (var name in others)
+            if (payload.TryGetProperty(name, out _))
+                throw new ArgumentException($"Give either text or {name}, not both");
+    }
+
     private static Matrix CreateMatrix(JsonElement payload)
     {
+        if (TryGetText(payload, out var gridText))
+        {
+            RejectAlongsideText(payload, "rows", "columns", "cells");
+            return TextImport.ParseMatrix(gridText);
+        }
+
         // The constructor enforces the size limit, so an oversized matrix is rejected before any cell is read.
         var matrix = new Matrix(payload.GetProperty("rows").GetInt32(), payload.GetProperty("columns").GetInt32());
 
@@ -41,6 +64,12 @@ public static class DatasetFactory
     private static Tree CreateTree(JsonElement payload)
     {
         if (payload.ValueKind != JsonValueKind.Object) return Tree.Empty();
+
+        if (TryGetText(payload, out var valuesText))
+        {
+            RejectAlongsideText(payload, "values", "nodes");
+            return TextImport.ParseTree(valuesText);
+        }
 
         if (payload.TryGetProperty("values", out var values))
         {
@@ -70,6 +99,17 @@ public static class DatasetFactory
 
     private static Graph CreateGraph(JsonElement payload)
     {
+        if (TryGetText(payload, out var graphText))
+        {
+            RejectAlongsideText(payload, "edges");
+            var format = payload.TryGetProperty("format", out var f)
+                ? (f.ValueKind == JsonValueKind.String ? f.GetString()! : throw new ArgumentException("format must be a string"))
+                : "edgeList";
+            bool directed = payload.TryGetProperty("directed", out var d) && d.GetBoolean();
+            int? declared = payload.TryGetProperty("nodeCount", out var n) && n.ValueKind != JsonValueKind.Null ? n.GetInt32() : null;
+            return TextImport.ParseGraph(graphText, format, directed, declared);
+        }
+
         int nodeCount = payload.GetProperty("nodeCount").GetInt32();
         var edges = payload.GetProperty("edges").EnumerateArray().Select(ParseEdge);
         return new Graph(nodeCount, edges);
