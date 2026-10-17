@@ -82,4 +82,25 @@ public class OperationContextTests
         Assert.Throws<OperationAbortedException>(() =>
             new GenerateMazeOperation(50, 50, seed: 1).Execute(Graph.Empty(1), context));
     }
+
+    [Fact]
+    public void WorkUnits_CountsEveryCheckpointUnit()
+    {
+        var context = new OperationContext(CancellationToken.None, null, maxWorkUnits: 1_000);
+
+        context.Checkpoint();
+        context.Checkpoint(41);
+
+        Assert.Equal(42, context.WorkUnits);
+    }
+
+    [Fact]
+    public void WorkUnits_IncludeEveryTracedStep()
+    {
+        var context = new OperationContext(CancellationToken.None, null, maxWorkUnits: long.MaxValue);
+
+        new GenerateMazeOperation(5, 5, seed: 1).Execute(Graph.Empty(1), context);
+
+        Assert.True(context.WorkUnits >= 24, $"a 5x5 maze records 24 steps but charged {context.WorkUnits}");
+    }
 }

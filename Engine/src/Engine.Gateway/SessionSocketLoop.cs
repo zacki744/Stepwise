@@ -1,7 +1,9 @@
-﻿using System.Net.WebSockets;
+﻿using System.Diagnostics;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Engine.Domain.Operations;
+using Engine.Domain.Tracing;
 using Engine.Protocol;
 using Engine.Session;
 
@@ -295,6 +297,8 @@ public static class SessionSocketLoop
         var options = execute.Options ?? new Dictionary<string, JsonElement>();
 
         OperationOutcome outcome;
+        OperationContext context;
+        TimeSpan elapsed;
         try
         {
             // Held only while the operation computes, never while results are written to the
@@ -306,7 +310,16 @@ public static class SessionSocketLoop
                 return;
             }
 
-            outcome = handler.Execute(sessions, sessionId, options, execution.CreateContext(ct));
+            context = execution.CreateContext(ct);
+            var started = Stopwatch.GetTimestamp();
+            try
+            {
+                outcome = handler.Execute(sessions, sessionId, options, context);
+            }
+            finally
+            {
+                elapsed = Stopwatch.GetElapsedTime(started);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -357,7 +370,11 @@ public static class SessionSocketLoop
         await SendAsync(socket, new OperationCompleteMessage(
             execute.RequestId,
             outcome.Value is not null ? JsonSerializer.SerializeToElement(outcome.Value, ProtocolJson.Options) : null,
-            finalState), ct);
+            finalState,
+            new ExecutionStatsDto(
+                TraceSummary.Of(outcome.Trace).TotalCount,
+                context.WorkUnits,
+                Math.Round(elapsed.TotalMilliseconds, 3))), ct);
     }
 
     private static async Task HandleGetState(

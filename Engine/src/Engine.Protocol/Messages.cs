@@ -45,10 +45,18 @@ public sealed record SessionReadyMessage(Guid SessionId) : ServerMessage;
 public sealed record StepEventMessage(string StepType, string Description, JsonElement? Payload) : ServerMessage;
 public sealed record DatasetSnapshotDto(string DatasetType, JsonElement Payload);
 
+/// <summary>
+/// What running an operation cost. Steps is how many steps the operation traced (even if the trace was
+/// coalesced), WorkUnits the cooperative work it was charged against its budget, ElapsedMs the wall time
+/// spent computing (including any wait for the session lock). Informational only: never replayed.
+/// </summary>
+public sealed record ExecutionStatsDto(int Steps, long WorkUnits, double ElapsedMs);
+
 public sealed record OperationCompleteMessage(
     Guid RequestId,
     JsonElement? ResultSummary,
-    DatasetSnapshotDto? FinalState = null) : ServerMessage;
+    DatasetSnapshotDto? FinalState = null,
+    ExecutionStatsDto? Stats = null) : ServerMessage;
 public sealed record OperationFailedMessage(Guid RequestId, string Reason) : ServerMessage;
 
 public sealed record StateMessage(Guid RequestId, DatasetSnapshotDto State) : ServerMessage;

@@ -42,6 +42,9 @@ public sealed class OperationContext
     /// <summary>A fresh no-limits context each call (contexts carry mutable counters, so never shared).</summary>
     public static OperationContext Unbounded => new(CancellationToken.None, timeLimit: null, maxWorkUnits: long.MaxValue);
 
+    /// <summary>Work units charged so far (Checkpoint calls plus one per traced step). Reported to clients as a cost measure.</summary>
+    public long WorkUnits => _workUnits;
+
     public void Checkpoint(long units = 1)
     {
         _workUnits += units;
