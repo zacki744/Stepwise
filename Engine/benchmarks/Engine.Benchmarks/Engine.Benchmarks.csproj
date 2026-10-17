@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Not part of Engine.sln on purpose: CI should not build or run benchmarks.
+       Run:  dotnet run -c Release --project Engine/benchmarks/Engine.Benchmarks -- --filter "*" -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Engine.Domain\Engine.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

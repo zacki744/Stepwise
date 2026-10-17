@@ -45,6 +45,32 @@ public class HardeningEndpointTests
         Assert.True(document.RootElement.GetProperty("maxSessions").GetInt32() > 0);
     }
 
+    // ---------- server-wide dataset budget ----------
+
+    [Fact]
+    public async Task CreateSession_BeyondTheServerWideDatasetBudget_IsServerBusy_AndHealthReportsUsage()
+    {
+        // A 100x100 matrix is ~40 KB, so two fit in 100,000 bytes and a third does not.
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure<SessionLifecycleOptions>(o => o.MaxTotalDatasetBytes = 100_000)));
+        using var first = await GatewayTestHelpers.ConnectAsync(factory);
+        using var second = await GatewayTestHelpers.ConnectAsync(factory);
+        using var third = await GatewayTestHelpers.ConnectAsync(factory);
+
+        await GatewayTestHelpers.SendCreateMatrixAsync(first, 100, 100);
+        Assert.IsType<SessionReadyMessage>(await GatewayTestHelpers.ReceiveAsync(first));
+        await GatewayTestHelpers.SendCreateMatrixAsync(second, 100, 100);
+        Assert.IsType<SessionReadyMessage>(await GatewayTestHelpers.ReceiveAsync(second));
+        await GatewayTestHelpers.SendCreateMatrixAsync(third, 100, 100);
+
+        var error = Assert.IsType<ErrorMessage>(await GatewayTestHelpers.ReceiveAsync(third));
+        Assert.Equal("server-busy", error.Code);
+
+        using var health = JsonDocument.Parse(await factory.CreateClient().GetStringAsync("/health"));
+        Assert.Equal(100_000, health.RootElement.GetProperty("maxDatasetBytes").GetInt64());
+        Assert.InRange(health.RootElement.GetProperty("datasetBytes").GetInt64(), 80_000, 100_000);
+    }
+
     // ---------- Origin ----------
 
     [Fact]

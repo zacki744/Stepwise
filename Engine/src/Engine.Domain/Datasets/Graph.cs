@@ -13,6 +13,7 @@ public sealed class Graph : IDataset, ITraversable<int>, IWeighted<int>
     private readonly int[] _edges;
     private readonly double[] _weights;
     public int EdgeCount => _edges.Length; // directed edges as stored
+    public long EstimatedBytes => 64L + 4L * _rowOffsets.Length + 12L * _edges.Length; // offsets + target (4) + weight (8) per edge
     public int NodeCount => _rowOffsets.Length - 1;
     public double WeightAt(int node, int index) => _weights[_rowOffsets[node] + index];
     public int Degree(int node) => _rowOffsets[node + 1] - _rowOffsets[node];

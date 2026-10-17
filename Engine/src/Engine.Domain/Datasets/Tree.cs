@@ -19,6 +19,7 @@ public sealed class Tree : IDataset, ITraversable<int>, IOrderable<int>
     private readonly List<int> _right;
     private readonly int _root; // -1 means empty tree
     public int SlotCount => _values.Count;
+    public long EstimatedBytes => 64L + 16L * _values.Count; // value (int?, 8) + left (4) + right (4) per slot
 
     private Tree(List<int?> values, List<int> left, List<int> right, int root)
     {

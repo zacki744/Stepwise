@@ -7,6 +7,7 @@ public readonly record struct Cell(int Row, int Column);
 public sealed class Matrix : IDataset, ITraversable<Cell>
 {
     private readonly int[] _cells;
+    public long EstimatedBytes => 64L + 4L * _cells.Length;
 
     public int Rows { get; }
     public int Columns { get; }

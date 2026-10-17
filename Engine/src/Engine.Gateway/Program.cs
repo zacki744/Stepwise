@@ -23,7 +23,10 @@ builder.Services.AddOptions<CorsOptions>().Configure<IOptions<SecurityOptions>>(
     }));
 
 builder.Services.AddSingleton(sp =>
-    new SessionManager(sp.GetRequiredService<IOptions<SessionLifecycleOptions>>().Value.MaxSessions));
+{
+    var lifecycle = sp.GetRequiredService<IOptions<SessionLifecycleOptions>>().Value;
+    return new SessionManager(lifecycle.MaxSessions, lifecycle.MaxTotalDatasetBytes);
+});
 builder.Services.AddSingleton(_ => OperationCatalog.BuildDefault());
 builder.Services.AddSingleton<ExecutionPolicy>();
 builder.Services.AddSingleton(sp =>
@@ -41,7 +44,14 @@ if (app.Services.GetRequiredService<IOptions<SecurityOptions>>().Value.AllowedOr
         "Security:AllowedOrigins is empty, so any website may open a session and call the API. Set it before exposing the server.");
 
 app.MapGet("/health", (SessionManager sessions) =>
-    new { status = "ok", sessions = sessions.ActiveSessionCount, maxSessions = sessions.MaxSessions });
+    new
+    {
+        status = "ok",
+        sessions = sessions.ActiveSessionCount,
+        maxSessions = sessions.MaxSessions,
+        datasetBytes = sessions.TotalDatasetBytes,
+        maxDatasetBytes = sessions.MaxTotalDatasetBytes
+    });
 
 app.MapGet("/operations", (OperationRegistry registry) =>
     registry.All
