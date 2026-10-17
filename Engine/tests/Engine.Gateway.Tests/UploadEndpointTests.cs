@@ -142,7 +142,7 @@ public class UploadEndpointTests
         using (var socket = await GatewayTestHelpers.ConnectAsync(factory))
         {
             await GatewayTestHelpers.SendAsync(socket, new UploadChunkMessage(Guid.NewGuid(), 0, 5, new string('a', 1_000)));
-            await WaitUntilAsync(() => budget.InFlightBytes == 1_000);
+            await WaitUntilAsync(() => budget.InFlightBytes == 1_000 * UploadAssembler.MemoryFactor);
 
             await socket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None);
         }

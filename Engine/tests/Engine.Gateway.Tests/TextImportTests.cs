@@ -285,4 +285,74 @@ public class TextImportTests
 
         Assert.True(error is ArgumentException or InvalidOperationException or FormatException, error?.GetType().Name);
     }
+
+    // ---------- scanning behaviour ----------
+
+    [Fact]
+    public void Matrix_OneEnormousLine_AllocatesLittle()
+    {
+        var text = string.Concat(Enumerable.Repeat("1 ", 400_000)); // 400k cells on a single line, built before measuring
+        TextImport.ParseMatrix("1 2"); // warm up
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var matrix = TextImport.ParseMatrix(text);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(400_000, matrix.Columns);
+        Assert.True(allocated < 12_000_000, $"allocated {allocated:N0} bytes; the scanner should not copy a string per value");
+    }
+
+    [Fact]
+    public void Matrix_RowLongerThanTheFirst_IsRejectedWithTheFullCount()
+    {
+        var error = LineError(() => TextImport.ParseMatrix("1 2\n1 2 3 4 5"));
+
+        Assert.Equal(2, error.Line);
+        Assert.Contains("found 5", error.Message);
+    }
+
+    [Fact]
+    public void Errors_EchoOnlyAShortPreviewOfALongBadToken()
+    {
+        var error = LineError(() => TextImport.ParseMatrix("1 " + new string('z', 100_000)));
+
+        Assert.True(error.Message.Length < 200, $"message was {error.Message.Length} characters");
+        Assert.EndsWith("is not a whole number", error.Message);
+    }
+
+    [Fact]
+    public void AdjacencyList_ColonWithoutSpace_IsAccepted()
+    {
+        var graph = TextImport.ParseGraph("0:1 2", "adjacencyList", true, null);
+
+        Assert.Equal(2, graph.EdgeCount);
+    }
+
+    [Fact]
+    public void AdjacencyList_TwoColons_OrTwoOwners_AreRejected()
+    {
+        Assert.Equal(1, LineError(() => TextImport.ParseGraph("0: 1: 2", "adjacencyList", false, null)).Line);
+        Assert.Equal(1, LineError(() => TextImport.ParseGraph("0 1: 2", "adjacencyList", false, null)).Line);
+    }
+
+    [Fact]
+    public void Parsers_ChargeTheContext_SoAHugePasteHitsTheBudget()
+    {
+        var text = string.Join('\n', Enumerable.Range(0, 5_000).Select(i => $"{i} {i + 1}"));
+        var context = new Engine.Domain.Operations.OperationContext(CancellationToken.None, timeLimit: null, maxWorkUnits: 100);
+
+        Assert.Throws<Engine.Domain.Operations.OperationAbortedException>(
+            () => TextImport.ParseGraph(text, "edgeList", false, null, context));
+    }
+
+    [Fact]
+    public void Factory_JsonEdges_AreMeteredToo()
+    {
+        var edges = string.Join(',', Enumerable.Range(0, 5_000).Select(i => $"[{i},{i + 1}]"));
+        using var document = JsonDocument.Parse($$"""{"nodeCount":5001,"edges":[{{edges}}]}""");
+        var context = new Engine.Domain.Operations.OperationContext(CancellationToken.None, timeLimit: null, maxWorkUnits: 100);
+
+        Assert.Throws<Engine.Domain.Operations.OperationAbortedException>(
+            () => DatasetFactory.Create("graph", document.RootElement, context));
+    }
 }

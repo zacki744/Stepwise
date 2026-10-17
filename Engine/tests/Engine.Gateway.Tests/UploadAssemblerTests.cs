@@ -89,14 +89,14 @@ public class UploadAssemblerTests
         var budget = new UploadBudget(10_000);
         using var assembler = new UploadAssembler(Limits(), budget);
         assembler.Accept(new UploadChunkMessage(Guid.NewGuid(), 0, 3, "aaaa"));
-        Assert.Equal(4, budget.InFlightBytes);
+        Assert.Equal(4 * UploadAssembler.MemoryFactor, budget.InFlightBytes);
 
         var fresh = Split("xyz", 2);
         assembler.Accept(fresh[0]);
         var done = assembler.Accept(fresh[1]);
 
         Assert.Equal("xyz", done.Json); // nothing left over from the abandoned upload
-        Assert.Equal(3, budget.InFlightBytes);
+        Assert.Equal(3 * UploadAssembler.MemoryFactor, budget.InFlightBytes);
     }
 
     [Theory]
@@ -143,7 +143,7 @@ public class UploadAssemblerTests
     [Fact]
     public void SharedBudgetExhausted_IsRejectedAsServerBusy()
     {
-        var budget = new UploadBudget(5);
+        var budget = new UploadBudget(4 * UploadAssembler.MemoryFactor + 8); // room for "aaaa" but not "bb" as well
         using var first = new UploadAssembler(Limits(), budget);
         using var second = new UploadAssembler(Limits(), budget);
 
@@ -159,7 +159,7 @@ public class UploadAssemblerTests
         var budget = new UploadBudget(10_000);
         var assembler = new UploadAssembler(Limits(), budget);
         assembler.Accept(new UploadChunkMessage(Guid.NewGuid(), 0, 2, "abcd"));
-        Assert.Equal(4, budget.InFlightBytes);
+        Assert.Equal(4 * UploadAssembler.MemoryFactor, budget.InFlightBytes);
 
         assembler.Dispose();
 
@@ -172,7 +172,7 @@ public class UploadAssemblerTests
         var budget = new UploadBudget(10_000);
         using var assembler = new UploadAssembler(Limits(), budget);
         assembler.Accept(new UploadChunkMessage(Guid.NewGuid(), 0, 1, "abcd"));
-        Assert.Equal(4, budget.InFlightBytes);
+        Assert.Equal(4 * UploadAssembler.MemoryFactor, budget.InFlightBytes);
 
         assembler.Reset();
 
@@ -203,5 +203,27 @@ public class UploadAssemblerTests
 
         Assert.Equal(100, granted);
         Assert.Equal(1_000, budget.InFlightBytes);
+    }
+
+    [Fact]
+    public void Budget_IsChargedForMemoryCost_NotJustWireSize()
+    {
+        var budget = new UploadBudget(10_000);
+        using var assembler = new UploadAssembler(Limits(), budget);
+
+        assembler.Accept(new UploadChunkMessage(Guid.NewGuid(), 0, 2, "aaaa"));
+
+        Assert.Equal(4 * UploadAssembler.MemoryFactor, budget.InFlightBytes);
+    }
+
+    [Fact]
+    public void MaxUploadBytes_StillLimitsTheRawWireSize()
+    {
+        // 8 bytes would fit MaxUploadBytes = 10 but costs 64 against a 10,000 budget: the raw limit is what rejects it.
+        using var assembler = new UploadAssembler(Limits(maxBytes: 7), new UploadBudget(10_000));
+
+        var result = assembler.Accept(new UploadChunkMessage(Guid.NewGuid(), 0, 1, "12345678"));
+
+        Assert.Equal("upload-too-large", result.Code);
     }
 }

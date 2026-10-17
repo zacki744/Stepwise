@@ -1,18 +1,41 @@
 ﻿using System.Text.Json;
 using Engine.Domain;
 using Engine.Domain.Datasets;
+using Engine.Domain.Operations;
 
 namespace Engine.Gateway;
 
 public static class DatasetFactory
 {
-    public static IDataset Create(string datasetType, JsonElement payload) => datasetType switch
+    /// <summary>
+    /// Builds a dataset from a payload. With a context, construction is metered like any operation, so a
+    /// huge payload is stopped by the same work and time budget instead of running unbounded.
+    /// </summary>
+    public static IDataset Create(string datasetType, JsonElement payload, OperationContext? context = null) => datasetType switch
     {
-        "matrix" => CreateMatrix(payload),
-        "graph" => CreateGraph(payload),
-        "tree" => CreateTree(payload),
+        "matrix" => CreateMatrix(payload, context),
+        "graph" => CreateGraph(payload, context),
+        "tree" => CreateTree(payload, context),
         _ => throw new ArgumentException($"Unknown datasetType '{datasetType}'")
     };
+
+    // Charges the context in batches while a JSON sequence is consumed lazily by a constructor.
+    private static IEnumerable<T> Metered<T>(IEnumerable<T> items, OperationContext? context)
+    {
+        if (context is null) return items;
+        return Iterate();
+
+        IEnumerable<T> Iterate()
+        {
+            int pending = 0;
+            foreach (var item in items)
+            {
+                if (++pending == 1_024) { context.Checkpoint(pending); pending = 0; }
+                yield return item;
+            }
+            if (pending > 0) context.Checkpoint(pending);
+        }
+    }
 
     // Besides the JSON shapes below, each dataset type accepts {"text": "..."}; see TextImport for the formats.
     private static bool TryGetText(JsonElement payload, out string text)
@@ -31,12 +54,12 @@ public static class DatasetFactory
                 throw new ArgumentException($"Give either text or {name}, not both");
     }
 
-    private static Matrix CreateMatrix(JsonElement payload)
+    private static Matrix CreateMatrix(JsonElement payload, OperationContext? context)
     {
         if (TryGetText(payload, out var gridText))
         {
             RejectAlongsideText(payload, "rows", "columns", "cells");
-            return TextImport.ParseMatrix(gridText);
+            return TextImport.ParseMatrix(gridText, context);
         }
 
         // The constructor enforces the size limit, so an oversized matrix is rejected before any cell is read.
@@ -50,7 +73,7 @@ public static class DatasetFactory
                 throw new ArgumentException($"cells must be an array of exactly {expected} integers (rows*columns, row-major)");
 
             int i = 0;
-            foreach (var cell in cells.EnumerateArray())
+            foreach (var cell in Metered(cells.EnumerateArray(), context))
             {
                 matrix[i / matrix.Columns, i % matrix.Columns] = cell.GetInt32();
                 i++;
@@ -61,20 +84,20 @@ public static class DatasetFactory
 
     // Three accepted shapes: nothing at all (an empty tree), {"values": [..]} (inserted in order), or an
     // exact structure {"root": n, "slotCount": n?, "nodes": [[slot, value, left, right], ..]} as a snapshot sends it.
-    private static Tree CreateTree(JsonElement payload)
+    private static Tree CreateTree(JsonElement payload, OperationContext? context)
     {
         if (payload.ValueKind != JsonValueKind.Object) return Tree.Empty();
 
         if (TryGetText(payload, out var valuesText))
         {
             RejectAlongsideText(payload, "values", "nodes");
-            return TextImport.ParseTree(valuesText);
+            return TextImport.ParseTree(valuesText, context);
         }
 
         if (payload.TryGetProperty("values", out var values))
         {
             if (values.ValueKind != JsonValueKind.Array) throw new ArgumentException("values must be an array of integers");
-            return Tree.FromValues(values.EnumerateArray().Select(v => v.GetInt32()));
+            return Tree.FromValues(Metered(values.EnumerateArray(), context).Select(v => v.GetInt32()));
         }
 
         if (payload.TryGetProperty("nodes", out var nodes))
@@ -82,7 +105,7 @@ public static class DatasetFactory
             if (nodes.ValueKind != JsonValueKind.Array) throw new ArgumentException("nodes must be an array");
             if (!payload.TryGetProperty("root", out var root)) throw new ArgumentException("A tree with nodes needs a root");
 
-            var parsed = nodes.EnumerateArray().Select(ParseTreeNode).ToList();
+            var parsed = Metered(nodes.EnumerateArray(), context).Select(ParseTreeNode).ToList();
             int? slotCount = payload.TryGetProperty("slotCount", out var slots) ? slots.GetInt32() : null;
             return Tree.FromNodes(root.GetInt32(), parsed, slotCount);
         }
@@ -97,7 +120,7 @@ public static class DatasetFactory
         return new TreeNodeData(node[0].GetInt32(), node[1].GetInt32(), node[2].GetInt32(), node[3].GetInt32());
     }
 
-    private static Graph CreateGraph(JsonElement payload)
+    private static Graph CreateGraph(JsonElement payload, OperationContext? context)
     {
         if (TryGetText(payload, out var graphText))
         {
@@ -107,11 +130,11 @@ public static class DatasetFactory
                 : "edgeList";
             bool directed = payload.TryGetProperty("directed", out var d) && d.GetBoolean();
             int? declared = payload.TryGetProperty("nodeCount", out var n) && n.ValueKind != JsonValueKind.Null ? n.GetInt32() : null;
-            return TextImport.ParseGraph(graphText, format, directed, declared);
+            return TextImport.ParseGraph(graphText, format, directed, declared, context);
         }
 
         int nodeCount = payload.GetProperty("nodeCount").GetInt32();
-        var edges = payload.GetProperty("edges").EnumerateArray().Select(ParseEdge);
+        var edges = Metered(payload.GetProperty("edges").EnumerateArray(), context).Select(ParseEdge);
         return new Graph(nodeCount, edges);
     }
 

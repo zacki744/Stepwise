@@ -14,14 +14,21 @@ public sealed record UploadResult(UploadStatus Status, string? Json = null, stri
 /// client bug), and any violation discards the partial upload so nothing half-built lingers.
 /// After a Complete result the buffered bytes stay reserved until <see cref="Reset"/>, so the memory
 /// used while the caller parses and handles the message is still counted against the shared budget.
+/// The shared budget is charged <see cref="MemoryFactor"/> times the wire size: the same text is held as
+/// UTF-16 in the builder, again as the final string, and once more as a parsed JSON document, so a payload
+/// costs several times its byte length. MaxUploadBytes still limits the raw size the client sends.
 /// </summary>
 public sealed class UploadAssembler(ConnectionLimitsOptions limits, UploadBudget budget) : IDisposable
 {
+    /// <summary>Approximate in-memory cost of an upload relative to its UTF-8 size (builder + string + parsed JSON).</summary>
+    public const int MemoryFactor = 8;
+
     private StringBuilder? _text;
     private Guid _uploadId;
     private int _total;
     private int _next;
-    private long _bytes;
+    private long _bytes;    // raw wire size, checked against MaxUploadBytes
+    private long _reserved; // what is held in the shared budget (_bytes * MemoryFactor)
     private DateTime _startedUtc;
 
     public bool InProgress => _text is not null;
@@ -61,11 +68,13 @@ public sealed class UploadAssembler(ConnectionLimitsOptions limits, UploadBudget
         long size = Encoding.UTF8.GetByteCount(chunk.Data);
         if (_bytes + size > limits.MaxUploadBytes)
             return Reject("upload-too-large", $"An upload may not exceed {limits.MaxUploadBytes:N0} bytes");
-        if (!budget.TryReserve(size))
+        long cost = size * MemoryFactor;
+        if (!budget.TryReserve(cost))
             return Reject("server-busy", "The server is holding its maximum amount of upload data; try again shortly");
 
         var text = _text!;
         _bytes += size;
+        _reserved += cost;
         text.Append(chunk.Data);
         _next++;
 
@@ -77,9 +86,10 @@ public sealed class UploadAssembler(ConnectionLimitsOptions limits, UploadBudget
     /// <summary>Discards any upload in progress and returns its reserved bytes.</summary>
     public void Reset()
     {
-        if (_bytes > 0) budget.Release(_bytes);
+        if (_reserved > 0) budget.Release(_reserved);
         _text = null;
         _bytes = 0;
+        _reserved = 0;
         _next = 0;
         _total = 0;
     }

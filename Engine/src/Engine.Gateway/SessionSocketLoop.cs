@@ -2,6 +2,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Engine.Domain;
 using Engine.Domain.Operations;
 using Engine.Domain.Tracing;
 using Engine.Protocol;
@@ -46,7 +47,7 @@ public static class SessionSocketLoop
                 switch (message)
                 {
                     case CreateSessionMessage create:
-                        await HandleCreateSession(socket, sessions, create, sessionId, logger, ct, AdoptSession);
+                        await HandleCreateSession(socket, sessions, execution, create, sessionId, logger, ct, AdoptSession);
                         break;
 
                     case RehydrateSessionMessage rehydrate:
@@ -187,13 +188,23 @@ public static class SessionSocketLoop
     }
 
     private static async Task HandleCreateSession(
-        WebSocket socket, SessionManager sessions, CreateSessionMessage create,
+        WebSocket socket, SessionManager sessions, ExecutionPolicy execution, CreateSessionMessage create,
         Guid? replacing, ILogger logger, CancellationToken ct, Action<Guid> adoptSession)
     {
         try
         {
             // Dataset construction runs first, so an invalid payload fails before touching the old session.
-            var dataset = DatasetFactory.Create(create.DatasetType, create.InitialPayload);
+            // It is real work on caller-supplied data, so it takes an execution slot and a metered context.
+            IDataset dataset;
+            using (var lease = await execution.TryEnterAsync(ct))
+            {
+                if (lease is null)
+                {
+                    await SendAsync(socket, new ErrorMessage("server-busy", ServerBusyReason), ct);
+                    return;
+                }
+                dataset = DatasetFactory.Create(create.DatasetType, create.InitialPayload, execution.CreateContext(ct));
+            }
             var session = sessions.Create(dataset, replacing);
             adoptSession(session.Id);
             await SendAsync(socket, new SessionReadyMessage(session.Id), ct);
@@ -201,6 +212,17 @@ public static class SessionSocketLoop
         catch (SessionCapacityException ex)
         {
             await SendAsync(socket, new ErrorMessage("server-busy", ex.Message), ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // connection is going away: RunAsync handles it quietly
+        }
+        catch (OperationAbortedException ex) when (ex.Reason == OperationAbortReason.Cancelled)
+        {
+        }
+        catch (OperationAbortedException ex)
+        {
+            await SendAsync(socket, new ErrorMessage("create-aborted", $"operation-aborted: {ex.Message}"), ct);
         }
         catch (Exception ex) when (IsClientInputException(ex))
         {
@@ -226,8 +248,6 @@ public static class SessionSocketLoop
 
         try
         {
-            var initialDataset = DatasetFactory.Create(rehydrate.DatasetType, rehydrate.InitialPayload);
-
             // The whole replay shares ONE context, so a long history can't buy unlimited work
             // by being split into many operations. The slot is released before any socket write.
             using (var lease = await execution.TryEnterAsync(ct))
@@ -238,9 +258,10 @@ public static class SessionSocketLoop
                     return;
                 }
 
+                var context = execution.CreateContext(ct);
+                var initialDataset = DatasetFactory.Create(rehydrate.DatasetType, rehydrate.InitialPayload, context);
                 var session = sessions.Create(initialDataset);
                 createdSessionId = session.Id;
-                var context = execution.CreateContext(ct);
 
                 foreach (var logged in rehydrate.OpLog ?? [])
                 {

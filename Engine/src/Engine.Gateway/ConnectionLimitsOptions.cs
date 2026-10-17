@@ -9,13 +9,13 @@ public sealed class ConnectionLimitsOptions
     /// Largest createSession/rehydrateSession payload accepted when it is sent in pieces (uploadChunk
     /// messages). Each piece is still bound by MaxMessageBytes; this caps the reassembled whole.
     /// </summary>
-    public long MaxUploadBytes { get; set; } = 64L * 1024 * 1024;
+    public long MaxUploadBytes { get; set; } = 16L * 1024 * 1024;
 
     /// <summary>Most chunks one upload may be split into. Stops a flood of tiny pieces.</summary>
     public int MaxUploadChunks { get; set; } = 4096;
 
     /// <summary>Buffered upload bytes allowed across ALL connections at once.</summary>
-    public long MaxInFlightUploadBytes { get; set; } = 256L * 1024 * 1024;
+    public long MaxInFlightUploadBytes { get; set; } = 512L * 1024 * 1024;
 
     /// <summary>Simultaneous connections allowed from one client address (each owns at most one session). 0 = no limit.</summary>
     public int MaxConnectionsPerIp { get; set; } = 10;
