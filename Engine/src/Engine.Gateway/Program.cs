@@ -1,4 +1,5 @@
 ﻿using System.Net.WebSockets;
+using System.Text.Json;
 using Engine.Gateway;
 using Engine.Session;
 using Microsoft.AspNetCore.Cors.Infrastructure;
@@ -68,7 +69,8 @@ app.MapGet("/operations", (OperationRegistry registry) =>
     registry.All
         .Select(h =>
         {
-            var descriptor = OperationDescriptors.TryGet(h.OperationId);
+            var definition = OperationDefinitions.TryGet(h.OperationId);
+            var descriptor = definition?.Descriptor;
             return new
             {
                 id = h.OperationId,
@@ -76,7 +78,10 @@ app.MapGet("/operations", (OperationRegistry registry) =>
                 label = descriptor?.Label ?? h.OperationId,
                 category = descriptor?.Category ?? "Other",
                 description = descriptor?.Description ?? "",
+                effect = definition is null ? null : JsonNamingPolicy.CamelCase.ConvertName(definition.Effect.ToString()),
                 options = descriptor?.Options ?? [],
+                returns = definition?.Output.Returns,
+                steps = definition?.Output.Steps ?? [],
                 exampleOptions = OperationExamples.TryGetElement(h.OperationId)
             };
         })

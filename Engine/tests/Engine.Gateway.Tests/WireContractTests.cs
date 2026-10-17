@@ -82,7 +82,15 @@ public class WireContractTests
             """
             {"id":"flip","datasetType":"matrix","label":"Flip","category":"Reshape",
              "description":"Mirror the grid left-to-right or top-to-bottom.",
+             "effect":"replacesState",
              "options":[{"name":"axis","kind":"choice","label":"Axis","required":false,"default":"horizontal","choices":["horizontal","vertical"]}],
+             "returns":null,
+             "steps":[{"type":"MatrixReshaped","description":"The grid was mirrored.",
+                       "visual":{"kind":"none","bind":{}},
+                       "payload":[{"name":"fromRows","type":"int","nullable":false},
+                                  {"name":"fromColumns","type":"int","nullable":false},
+                                  {"name":"toRows","type":"int","nullable":false},
+                                  {"name":"toColumns","type":"int","nullable":false}]}],
              "exampleOptions":{"axis":"vertical"}}
             """,
             flip);
@@ -103,6 +111,14 @@ public class WireContractTests
                {"name":"row","kind":"row","label":"Row","required":true,"default":null,"choices":null},
                {"name":"column","kind":"column","label":"Column","required":true,"default":null,"choices":null},
                {"name":"value","kind":"int","label":"Value","required":true,"default":null,"choices":null}],
+             "effect":"replacesStateAndProducesValue",
+             "returns":{"description":"The value the cell held before.","value":{"type":"int","nullable":false}},
+             "steps":[{"type":"CellChanged","description":"A cell was overwritten.",
+                       "visual":{"kind":"highlightCell","bind":{"row":"row","column":"column"}},
+                       "payload":[{"name":"row","type":"int","nullable":false},
+                                  {"name":"column","type":"int","nullable":false},
+                                  {"name":"oldValue","type":"int","nullable":false},
+                                  {"name":"newValue","type":"int","nullable":false}]}],
              "exampleOptions":{"row":0,"column":0,"value":7}}
             """,
             setCell);
@@ -116,7 +132,7 @@ public class WireContractTests
 
         foreach (var entry in document.RootElement.EnumerateArray())
             Assert.Equal(
-                new[] { "category", "datasetType", "description", "exampleOptions", "id", "label", "options" },
+                new[] { "category", "datasetType", "description", "effect", "exampleOptions", "id", "label", "options", "returns", "steps" },
                 entry.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal));
     }
 }
