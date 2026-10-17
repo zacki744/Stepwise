@@ -61,7 +61,7 @@ public class OperationContractTests
         return tree;
     }
 
-    private static string Fingerprint(IDataset dataset)
+    internal static string Fingerprint(IDataset dataset)
     {
         var text = new StringBuilder();
         switch (dataset)
