@@ -14,6 +14,9 @@ public static class SessionSocketLoop
     private const string SessionExpiredReason =
         "session-expired: this session was evicted; rehydrate from your saved snapshot and operation log";
 
+    private const string DuplicateRequestReason =
+        "duplicate-request: this requestId was already used on this connection, so it was not run again; use getState to see the current dataset";
+
     private const string ServerBusyReason =
         "server-busy: the server is running its maximum number of concurrent operations; try again shortly";
 
@@ -26,6 +29,7 @@ public static class SessionSocketLoop
         // adopting a new one evicts the previous, and ending the connection evicts the current.
         Guid? sessionId = null;
         using var uploads = new UploadAssembler(limits, uploadBudget);
+        var recentRequests = new RecentRequestIds();
 
         void AdoptSession(Guid newId)
         {
@@ -67,6 +71,11 @@ public static class SessionSocketLoop
                             // Evicted underneath us (idle sweep). Every Execute still gets exactly one terminal message.
                             sessionId = null;
                             await SendAsync(socket, new OperationFailedMessage(execute.RequestId, SessionExpiredReason), ct);
+                            break;
+                        }
+                        if (!recentRequests.TryRecord(execute.RequestId))
+                        {
+                            await SendAsync(socket, new OperationFailedMessage(execute.RequestId, DuplicateRequestReason), ct);
                             break;
                         }
                         await HandleExecute(socket, sessions, registry, execution, id, execute, logger, ct);

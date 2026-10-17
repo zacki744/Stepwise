@@ -17,6 +17,9 @@ public sealed class ConnectionLimitsOptions
     /// <summary>Buffered upload bytes allowed across ALL connections at once.</summary>
     public long MaxInFlightUploadBytes { get; set; } = 256L * 1024 * 1024;
 
+    /// <summary>Simultaneous connections allowed from one client address (each owns at most one session). 0 = no limit.</summary>
+    public int MaxConnectionsPerIp { get; set; } = 10;
+
     /// <summary>An upload must finish within this long of its first chunk, or the connection is closed.</summary>
     public TimeSpan UploadTimeout { get; set; } = TimeSpan.FromMinutes(2);
 }
